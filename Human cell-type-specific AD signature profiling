@@ -1,0 +1,72 @@
+### Cell-type-specific AD signature identification
+
+## Human cell type annotation
+
+#cell type markers
+exN_markers<- list(c("SLC17A6", "SLC17A7", "NRGN", "CAMK2A", "SATB2", "COL5A1", "SDK2", "NEFM")) 
+inN_markers<- list(c("SLC32A1", "GAD1", "GAD2", "TAC1", "PENK", "SST", "NPY", "MYBPC1", "PVALB", "GABBR2")) 
+per_markers<- list(c("AMBP", "HIGD1B", "COX4I2", "AOC3", "PDE5A", "PTH1R", "P2RY14", "ABCC9", "KCNJ8", "CD248"))
+end_markers<- list(c("FLT1", "CLDN5", "VTN", "ITM2A", "VWF", "FAM167B", "BMX", "CLEC1B"))
+ast_markers<- list(c("GFAP", "EAAT1", "AQP4", "LCN2", "GJA1", "FGFR3", "NKAIN4"))
+mic_markers<- list(c("IBA1", "P2RY12", "CSF1R", "CD74", "C3", "CST3", "HEXB", "C1QA", "CX3CR1", "AIF1"))
+oli_markers<- list(c("OLIG2", "MBP", "MOBP", "PLP1", "MOG", "CLDN11", "MYRF", "GALC", "ERMN", "MAG"))
+opc_markers<- list(c("VCAN", "CSPG4", "PDGFRA", "SOX10", "NEU4", "PCDG15", "GPR37L1", "C1QL1", "CDO1", "EPN2"))
+
+#calculate cell type scores base on expression of marker genes
+mzl2<- mzl
+DefaultAssay(mzl2) <- "integrated" 
+mzl2<-AddModuleScore(object=mzl2, features =  exN_markers, pool = NULL,  nbin = 20,  ctrl = 100,  k = FALSE,  assay = NULL, name = 'ex.neu',  seed = 1,  search = FALSE, replace = TRUE)
+mzl2<-AddModuleScore(object=mzl2, features =  inN_markers, pool = NULL,  nbin = 20,  ctrl = 100,  k = FALSE,  assay = NULL, name = 'in.neu',  seed = 1,  search = FALSE, replace = TRUE)
+mzl2<-AddModuleScore(object=mzl2, features =  end_markers,  pool = NULL,  nbin = 20,  ctrl = 100,  k = FALSE,  assay = NULL,  name = 'end',  seed = 1,  search = FALSE, replace = TRUE)
+mzl2<-AddModuleScore(object=mzl2, features =  per_markers,  pool = NULL,  nbin = 20,  ctrl = 100,  k = FALSE,  assay = NULL,  name = 'per',  seed = 1,  search = FALSE, replace = TRUE)
+mzl2<-AddModuleScore(object=mzl2, features =  ast_markers,  pool = NULL,  nbin = 20,  ctrl = 100,  k = FALSE,  assay = NULL,  name = 'ast',  seed = 1,  search = FALSE, replace = TRUE)
+mzl2<-AddModuleScore(object=mzl2, features =  mic_markers,  pool = NULL,  nbin = 20,  ctrl = 100,  k = FALSE,  assay = NULL,  name = 'mic',  seed = 1,  search = FALSE, replace = TRUE)
+mzl2<-AddModuleScore(object=mzl2, features =  oli_markers,  pool = NULL,  nbin = 20,  ctrl = 100,  k = FALSE,  assay = NULL,  name = 'oli',  seed = 1,  search = FALSE, replace = TRUE)
+mzl2<-AddModuleScore(object=mzl2, features =  opc_markers,  pool = NULL,  nbin = 20,  ctrl = 100,  k = FALSE,  assay = NULL,  name = 'opc',  seed = 1,  search = FALSE, replace = TRUE)
+
+#create metadata 
+mzl2_new_meta<- mzl2@meta.data
+colnames(mzl2_new_meta)
+mzl2_new_meta$cell_type<- names(mzl2_new_meta[, 23:30])[apply(mzl2_new_meta[, 23:30],1,which.max)]
+table(mzl2_new_meta$cell_type)
+
+#Max and second max
+mzl2_new_meta$x1<- apply(mzl2_new_meta[, 23:30], 1, max)
+mzl2_new_meta$x2<- apply(mzl2_new_meta[, 23:30], 1, function(x) x[order(x)[7]]) #in decreasing order
+mzl2_new_meta$x1_x2<- (mzl2_new_meta$x1 - mzl2_new_meta$x2)/mzl2_new_meta$x1  
+mzl2_new_meta$x1_x2<- ifelse(mzl2_new_meta$x1_x2 < 0.2, 1,0) #if the difference between top two scores is less than 20%, 1, if not 0
+table(mzl2_new_meta$x1_x2)
+
+#Make second column including hybrid
+mzl2_new_meta$cell_type2<- mzl2_new_meta$cell_type
+mzl2_new_meta$cell_type2<- ifelse(mzl2_new_meta$x1_x2 == 1, "hybrid", mzl2_new_meta$cell_type2 )
+table(mzl2_new_meta$cell_type2) 
+mzl2_new_meta$cell_type<- gsub("1", "", mzl2_new_meta$cell_type2)
+unique(mzl2_new_meta$cell_type)
+
+mzl <-AddMetaData(mzl, mzl2_new_meta$cell_type, col.name = 'cell_type_ident')
+
+
+
+
+
+
+### Identify DEGs
+Celltype <- c("ast", "mic", "ex.neu", "in.neu", "oli", "opc")
+
+library(stringr)
+DEG.list.FDR2 <- NULL
+DEG.list.FDR<- NULL
+for (key in Celltype)  {
+Idents(mzl) <- "cell_type_ident"
+subcelltype <- subset(mzl, idents= key)
+Idents(subcelltype) <- "Integrated_case_ctl"
+DEG.list <- FindMarkers(subcelltype, ident.1= "AD", ident.2 ="ctl", verbose = FALSE, test.use = "MAST", logfc.threshold = 0.1, latent.vars = "dataset")
+DEG.list$gene <- row.names(DEG.list)
+DEG.list.FDR <- subset(DEG.list, DEG.list$p_val_adj< 0.05)
+DEG.list.FDR$dir<- ifelse(DEG.list.FDR$avg_log2 < 0, "neg","pos")
+DEG.list.FDR$celltype<- key
+DEG.list.FDR2<- rbind(DEG.list.FDR2, DEG.list.FDR)
+}
+
+final_DEG_list <- DEG.list.FDR2
